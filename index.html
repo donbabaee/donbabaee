@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>کنترل ساعت هوشمند ESP32</title>
+    <style>
+        :root {
+            --primary: #2196F3;
+            --secondary: #FF9800;
+            --danger: #f44336;
+            --text-dark: #333;
+            --bg-light: #f5f5f5;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-light);
+            color: var(--text-dark);
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: var(--primary);
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .clock-display {
+            font-size: 3rem;
+            text-align: center;
+            margin: 30px 0;
+            font-family: 'Courier New', monospace;
+            color: var(--primary);
+            letter-spacing: 3px;
+            direction: ltr;
+        }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 30px;
+        }
+        
+        button {
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            background-color: var(--primary);
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+        
+        button:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+        }
+        
+        .danger {
+            background-color: var(--danger);
+        }
+        
+        .status {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-radius: 8px;
+        }
+        
+        .connection-status {
+            display: inline-block;
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            background-color: #f44336;
+            margin-left: 5px;
+        }
+        
+        .connected {
+            background-color: #4CAF50;
+        }
+        
+        @media (max-width: 600px) {
+            .controls {
+                grid-template-columns: 1fr;
+            }
+            
+            .clock-display {
+                font-size: 2.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>کنترل ساعت هوشمند ESP32</h1>
+    
+    <div class="clock-display" id="clock">--:--:--</div>
+    
+    <div class="controls">
+        <button onclick="adjustTime('HOUR', 1)">+ ساعت</button>
+        <button onclick="adjustTime('HOUR', -1)">- ساعت</button>
+        <button onclick="adjustTime('MIN', 1)">+ دقیقه</button>
+        <button onclick="adjustTime('MIN', -1)">- دقیقه</button>
+        <button onclick="sendCommand('TOGGLE')">تغییر حالت 12/24 ساعته</button>
+        <button class="danger" onclick="sendCommand('RESET')">بازنشانی ساعت</button>
+    </div>
+    
+    <div class="status">
+        <p>وضعیت اتصال: <span id="status-text">قطع</span> <span class="connection-status" id="connection-status"></span></p>
+        <p>آخرین به‌روزرسانی: <span id="last-update">--:--:--</span></p>
+    </div>
+    
+    <script>
+        // تنظیمات اتصال
+        const config = {
+            // اگر در همان شبکه محلی هستید، آدرس IP ESP32 را وارد کنید
+            esp32Ip: '192.168.254.68',
+            // اگر از اینترنت متصل می‌شوید، آدرس عمومی یا دامنه را وارد کنید
+            // esp32Ip: 'your-public-ip-or-domain.com',
+            port: 81,
+            reconnectInterval: 3000
+        };
+        
+        let ws;
+        let isConnected = false;
+        
+        // اتصال به WebSocket
+        function connect() {
+            const wsUrl = `ws://${config.esp32Ip}:${config.port}/`;
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+                console.log('Connected to ESP32');
+                updateConnectionStatus(true);
+                // درخواست همگام‌سازی زمان
+                ws.send('SYNC');
+            };
+            
+            ws.onmessage = function(event) {
+                const data = event.data;
+                console.log('Received:', data);
+                
+                // به‌روزرسانی زمان آخرین تغییر
+                document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+                
+                if (data.startsWith('TIME:')) {
+                    // به‌روزرسانی نمایش ساعت
+                    document.getElementById('clock').textContent = data.substring(5);
+                }
+            };
+            
+            ws.onclose = function() {
+                console.log('Disconnected from ESP32');
+                updateConnectionStatus(false);
+                // تلاش مجدد برای اتصال
+                setTimeout(connect, config.reconnectInterval);
+            };
+            
+            ws.onerror = function(error) {
+                console.error('WebSocket Error:', error);
+            };
+        }
+        
+        // به‌روزرسانی وضعیت اتصال در رابط کاربری
+        function updateConnectionStatus(connected) {
+            isConnected = connected;
+            const statusElem = document.getElementById('connection-status');
+            const statusText = document.getElementById('status-text');
+            
+            if (connected) {
+                statusElem.classList.add('connected');
+                statusElem.classList.remove('disconnected');
+                statusText.textContent = 'متصل';
+            } else {
+                statusElem.classList.remove('connected');
+                statusElem.classList.add('disconnected');
+                statusText.textContent = 'قطع';
+            }
+        }
+        
+        // تنظیم زمان
+        function adjustTime(type, value) {
+            if (!isConnected) {
+                alert('ابتدا به دستگاه متصل شوید');
+                return;
+            }
+            
+            const cmd = `ADJUST_${type}:${value}`;
+            ws.send(cmd);
+            console.log('Sent:', cmd);
+        }
+        
+        // ارسال دستور عمومی
+        function sendCommand(command) {
+            if (!isConnected) {
+                alert('ابتدا به دستگاه متصل شوید');
+                return;
+            }
+            
+            ws.send(command);
+            console.log('Sent:', command);
+        }
+        
+        // شروع اتصال هنگام بارگذاری صفحه
+        window.onload = function() {
+            connect();
+            
+            // نمایش آدرس اتصال در کنسول
+            console.log(`Attempting to connect to ws://${config.esp32Ip}:${config.port}/`);
+        };
+    </script>
+</body>
+</html>
